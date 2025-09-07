@@ -416,6 +416,9 @@ Value Worker::search(
 
         auto move_history = quiet ? m_td.history.get_quiet_stats(pos, m, ply, ss) : 0;
 
+        i32 base_reduction = static_cast<i32>(
+              std::round(1024 * (0.77 + std::log(depth) * std::log(moves_played + 1) / 2.36)));
+
         if (!ROOT_NODE && best_value > -VALUE_WIN) {
             // Late Move Pruning (LMP)
             if (moves_played >= 3 + depth * depth) {
@@ -424,7 +427,8 @@ Value Worker::search(
 
             // Forward Futility Pruning
             Value futility = static_eval + 500 + 100 * depth;
-            if (quiet && !is_in_check && depth <= 8 && futility <= alpha) {
+            i32 lmr_depth = depth - base_reduction / 1024;
+            if (quiet && !is_in_check && lmr_depth <= 8 && futility <= alpha) {
                 moves.skip_quiets();
                 continue;
             }
@@ -454,8 +458,7 @@ Value Worker::search(
         Depth new_depth = depth - 1 + pos_after.is_in_check();
         Value value;
         if (depth >= 3 && moves_played >= 3 + 2 * PV_NODE) {
-            i32 reduction = static_cast<i32>(
-              std::round(1024 * (0.77 + std::log(depth) * std::log(moves_played) / 2.36)));
+            i32 reduction = base_reduction;
             reduction -= 1024 * PV_NODE;
 
             if (cutnode) {
