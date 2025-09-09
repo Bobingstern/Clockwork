@@ -471,6 +471,8 @@ Value Worker::search(
 
             if ((ss + 1)->fail_high_count > 3) {
                 reduction += 1024;
+                if (improving && cutnode)
+                    reduction += 200;
             }
 
             if (quiet) {
