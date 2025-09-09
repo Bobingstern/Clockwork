@@ -350,12 +350,24 @@ Value Worker::search(
     bool  is_in_check = pos.is_in_check();
     Value correction  = 0;
     Value raw_eval    = -VALUE_INF;
-    Value static_eval = -VALUE_INF;
+    ss->static_eval = -VALUE_INF;
     if (!is_in_check) {
         correction  = m_td.history.get_correction(pos);
         raw_eval    = is_in_check ? -VALUE_INF : evaluate(pos);
-        static_eval = raw_eval + correction;
+        ss->static_eval = raw_eval + correction;
     }
+    bool  improving                     = [&]() {
+        if (is_in_check) {
+            return false;
+        }
+        if (ply >= 2 && (ss - 2)->static_eval != -VALUE_INF) {
+            return ss->static_eval > (ss - 2)->static_eval;
+        }
+        if (ply >= 4 && (ss - 4)->static_eval != -VALUE_INF) {
+            return ss->static_eval > (ss - 4)->static_eval;
+        }
+        return true;
+    }();
 
     // Internal Iterative Reductions
     if ((PV_NODE || cutnode) && depth >= 8 && (!tt_data || tt_data->move == Move::none())) {
@@ -363,13 +375,13 @@ Value Worker::search(
     }
 
     // Reuse TT score as a better positional evaluation
-    auto tt_adjusted_eval = static_eval;
-    if (tt_data && tt_data->bound != (tt_data->score > static_eval ? Bound::Upper : Bound::Lower)) {
+    auto tt_adjusted_eval = ss->static_eval;
+    if (tt_data && tt_data->bound != (tt_data->score > ss->static_eval ? Bound::Upper : Bound::Lower)) {
         tt_adjusted_eval = tt_data->score;
     }
 
     if (!PV_NODE && !is_in_check && depth <= tuned::rfp_depth
-        && tt_adjusted_eval >= beta + tuned::rfp_margin * depth) {
+        && tt_adjusted_eval >= beta + tuned::rfp_margin * depth - 69 * improving) {
         return tt_adjusted_eval;
     }
 
@@ -391,7 +403,7 @@ Value Worker::search(
     }
 
     // Razoring
-    if (!PV_NODE && !is_in_check && depth <= 7 && static_eval + 707 * depth < alpha) {
+    if (!PV_NODE && !is_in_check && depth <= 7 && ss->static_eval + 707 * depth < alpha) {
         const Value razor_score = quiesce<IS_MAIN>(pos, ss, alpha, beta, ply);
         if (razor_score <= alpha) {
             return razor_score;
@@ -423,7 +435,7 @@ Value Worker::search(
             }
 
             // Forward Futility Pruning
-            Value futility = static_eval + 500 + 100 * depth;
+            Value futility = ss->static_eval + 500 + 100 * depth;
             if (quiet && !is_in_check && depth <= 8 && futility <= alpha) {
                 moves.skip_quiets();
                 continue;
@@ -566,8 +578,8 @@ Value Worker::search(
     // Update to correction history.
     if (!is_in_check
         && !(best_move != Move::none() && (best_move.is_capture() || best_move.is_promotion()))
-        && !((bound == Bound::Lower && best_value <= static_eval)
-             || (bound == Bound::Upper && best_value >= static_eval))) {
+        && !((bound == Bound::Lower && best_value <= ss->static_eval)
+             || (bound == Bound::Upper && best_value >= ss->static_eval))) {
         m_td.history.update_correction_history(pos, depth, best_value - raw_eval);
     }
 
@@ -615,18 +627,18 @@ Value Worker::quiesce(const Position& pos, Stack* ss, Value alpha, Value beta, i
     bool  is_in_check = pos.is_in_check();
     Value correction  = 0;
     Value raw_eval    = -VALUE_INF;
-    Value static_eval = -VALUE_INF;
+    ss->static_eval = -VALUE_INF;
     if (!is_in_check) {
         correction  = m_td.history.get_correction(pos);
         raw_eval    = is_in_check ? -VALUE_INF : evaluate(pos);
-        static_eval = raw_eval + correction;
+        ss->static_eval = raw_eval + correction;
     }
 
     // Stand pat
-    if (static_eval >= beta) {
-        return static_eval;
+    if (ss->static_eval >= beta) {
+        return ss->static_eval;
     }
-    alpha = std::max(alpha, static_eval);
+    alpha = std::max(alpha, ss->static_eval);
 
     MovePicker moves{pos, m_td.history, Move::none(), ply, ss};
     if (!is_in_check) {
@@ -634,7 +646,7 @@ Value Worker::quiesce(const Position& pos, Stack* ss, Value alpha, Value beta, i
     }
 
     Move best_move = Move::none();
-    Value best_value     = static_eval;
+    Value best_value     = ss->static_eval;
     u32   moves_searched = 0;
 
     // Iterate over the move list

@@ -39,6 +39,7 @@ struct Stack {
     Move           killer;
     ContHistEntry* cont_hist_entry;
     i32            fail_high_count;
+    Value static_eval;
 };
 
 struct SearchLimits {
